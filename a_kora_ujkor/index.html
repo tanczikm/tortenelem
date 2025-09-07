@@ -36,7 +36,7 @@
     font-size:48px; line-height:1; padding:10px;
     border-radius:8px; background: rgba(0,0,0,0.25); color:var(--fg);
     user-select:none; cursor:pointer;
-    z-index:10; /* hozzáadva: a kép fölé kerüljenek */
+    z-index:10;
   }
   .arrow.left { left: 12px; }
   .arrow.right { right: 12px; }
@@ -123,7 +123,7 @@ function updateInfo(){
 }
 
 function next(){ if (currentIndex < images.length - 1) showImage(currentIndex + 1); }
-function prev(){ if (currentIndex > 0) showImage(currentIndex - 1); }
+function prev(){ if (currentIndex > 0) showImage(currentIndex - 1); showImage(currentIndex - 1); }
 
 prevBtn.addEventListener("click", prev);
 nextBtn.addEventListener("click", next);
@@ -139,7 +139,7 @@ viewer.addEventListener("wheel",(e)=>{
   const factor = e.deltaY < 0 ? 1.12 : 1/1.12;
   const newZoom = clamp(zoom * factor, minZoom, maxZoom);
   zoom = newZoom;
-  tx = 0; // oldalirányban mindig középen
+  tx = 0; // desktopon oldal fix
   ty = clamp(ty, getMinTy(), getMaxTy());
   applyTransform();
 }, { passive: false });
@@ -150,18 +150,29 @@ mainImg.addEventListener("dblclick", ()=>{
   applyTransform();
 });
 
-let panning=false, startY=0, startTy=0;
+// Egérrel panning (desktop)
+let panning=false, startX=0, startY=0, startTx=0, startTy=0;
 mainImg.addEventListener("pointerdown",(e)=>{
   if (e.button && e.button!==0) return;
   panning=true;
   mainImg.setPointerCapture(e.pointerId);
-  startY=e.clientY; startTy=ty;
+  startX=e.clientX; startY=e.clientY;
+  startTx=tx; startTy=ty;
   mainImg.classList.add("grabbing");
 });
 mainImg.addEventListener("pointermove",(e)=>{
   if (!panning) return;
-  let newTy = startTy + (e.clientY-startY);
-  ty = clamp(newTy, getMinTy(), getMaxTy());
+  // desktopon csak függőleges
+  if (!isTouch()) {
+    let newTy = startTy + (e.clientY-startY);
+    ty = clamp(newTy, getMinTy(), getMaxTy());
+    tx = 0;
+  } else {
+    tx = startTx + (e.clientX-startX);
+    ty = startTy + (e.clientY-startY);
+    tx = clamp(tx, getMinTx(), getMaxTx());
+    ty = clamp(ty, getMinTy(), getMaxTy());
+  }
   applyTransform();
 });
 mainImg.addEventListener("pointerup",(e)=>{
@@ -174,8 +185,37 @@ mainImg.addEventListener("pointercancel",()=>{
   panning=false; mainImg.classList.remove("grabbing");
 });
 
+// TOUCH PINCH ZOOM
+let touchStartDist = 0;
+let startZoom = 1;
+mainImg.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    touchStartDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    startZoom = zoom;
+  }
+}, { passive:false });
+
+mainImg.addEventListener('touchmove', e => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    const currentDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    let newZoom = clamp(startZoom * (currentDist / touchStartDist), minZoom, maxZoom);
+    zoom = newZoom;
+    tx = clamp(tx, getMinTx(), getMaxTx());
+    ty = clamp(ty, getMinTy(), getMaxTy());
+    applyTransform();
+  }
+}, { passive:false });
+
 function applyTransform(){
-  if (zoom === 1) { tx = 0; ty = 0; }
+  if (zoom === 1 && !isTouch()) { tx = 0; ty = 0; }
   mainImg.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${zoom})`;
 }
 
@@ -190,6 +230,20 @@ function getMinTy(){
 }
 function getMaxTy(){
   return -getMinTy();
+}
+function getMinTx(){
+  if (!mainImg.naturalWidth) return 0;
+  const vw = viewer.clientWidth;
+  const imgW = mainImg.naturalWidth * zoom * (mainImg.clientHeight / mainImg.naturalHeight);
+  if (imgW <= vw) return 0;
+  return -(imgW - vw) / 2;
+}
+function getMaxTx(){
+  return -getMinTx();
+}
+
+function isTouch(){
+  return navigator.maxTouchPoints > 0;
 }
 
 loadImages();
