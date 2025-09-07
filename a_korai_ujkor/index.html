@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A korai újkor</title>
+<style>
+  :root { --bg:#000; --fg:#fff; --overlay-bg: rgba(0,0,0,0.45); }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial; }
+  .lightbox {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); overflow:hidden;
+  }
+  .top-info {
+    position:absolute; top:12px; right:12px;
+    background:var(--overlay-bg); color:var(--fg);
+    padding:8px 12px; border-radius:8px; font-weight:600; font-size:16px;
+    backdrop-filter: blur(4px);
+  }
+  .viewer {
+    position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center;
+    overflow:hidden; touch-action: none;
+  }
+  #mainImg {
+    max-width:100%; max-height:100%;
+    will-change: transform;
+    user-select:none; -webkit-user-drag:none;
+    touch-action: none; cursor: grab;
+    transition: transform 0.08s linear;
+    position:absolute; left:50%; top:50%;
+    transform:translate(-50%,-50%) scale(1);
+  }
+  #mainImg.grabbing { cursor: grabbing; }
+  .arrow {
+    position:absolute; top:50%; transform:translateY(-50%);
+    font-size:48px; line-height:1; padding:10px;
+    border-radius:8px; background: rgba(0,0,0,0.25); color:var(--fg);
+    user-select:none; cursor:pointer;
+  }
+  .arrow.left { left: 12px; }
+  .arrow.right { right: 12px; }
+  .empty {
+    color:#ddd; font-size:20px; text-align:center; padding:20px;
+    background: rgba(255,255,255,0.02); border-radius:8px;
+  }
+  @media (max-width:600px){
+    .arrow { font-size:34px; padding:8px; }
+    .top-info { font-size:14px; padding:6px 10px; }
+  }
+</style>
+</head>
+<body>
+  <div class="lightbox" id="lightbox">
+    <div class="top-info" id="topInfo">Betöltés…</div>
+
+    <div class="viewer" id="viewer">
+      <div class="arrow left" id="prevBtn">❮</div>
+      <img id="mainImg" src="" alt="oldal" draggable="false">
+      <div class="arrow right" id="nextBtn">❯</div>
+    </div>
+
+    <div id="emptyMsg" class="empty" style="display:none">Nincsenek képek az <code>images/</code> mappában (page1.png, page2.png, ...).</div>
+  </div>
+
+<script>
+const imagePath = "images/";
+const maxPages = 300;
+
+let images = [];
+let currentIndex = 0;
+let zoom = 1;
+let tx = 0, ty = 0;
+const minZoom = 1, maxZoom = 8;
+
+const mainImg = document.getElementById("mainImg");
+const topInfo = document.getElementById("topInfo");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
+const viewer = document.getElementById("viewer");
+const emptyMsg = document.getElementById("emptyMsg");
+
+async function loadImages() {
+  images = [];
+  for (let i = 1; i <= maxPages; i++) {
+    const url = imagePath + "page" + i + ".png";
+    if (await checkImage(url)) images.push("page"+i+".png");
+  }
+  if (images.length === 0) {
+    showEmpty();
+    return;
+  }
+  showImage(0);
+}
+
+function checkImage(url){
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>resolve(true);
+    img.onerror = ()=>resolve(false);
+    img.src = url + "?_=" + Date.now();
+  });
+}
+
+function showEmpty(){
+  topInfo.textContent = "Nincsenek képek";
+  emptyMsg.style.display = "block";
+  viewer.style.display = "none";
+}
+
+function showImage(idx){
+  if (!images.length) return;
+  if (idx < 0 || idx >= images.length) return;
+  currentIndex = idx;
+  zoom = 1; tx = 0; ty = 0;
+  mainImg.style.transform = `translate(-50%,-50%) scale(1)`;
+  mainImg.src = imagePath + images[currentIndex];
+  updateInfo();
+}
+
+function updateInfo(){
+  topInfo.textContent = `Oldal ${currentIndex+1} / ${images.length}`;
+}
+
+function next(){ if (currentIndex < images.length - 1) showImage(currentIndex + 1); }
+function prev(){ if (currentIndex > 0) showImage(currentIndex - 1); }
+
+prevBtn.addEventListener("click", prev);
+nextBtn.addEventListener("click", next);
+
+document.addEventListener("keydown",(e)=>{
+  if (e.key==="ArrowLeft") prev();
+  if (e.key==="ArrowRight") next();
+});
+
+viewer.addEventListener("wheel",(e)=>{
+  e.preventDefault();
+  if (!images.length) return;
+  const factor = e.deltaY < 0 ? 1.12 : 1/1.12;
+  const newZoom = clamp(zoom * factor, minZoom, maxZoom);
+  zoom = newZoom;
+  tx = 0; // oldalirányban mindig középen
+  ty = clamp(ty, getMinTy(), getMaxTy());
+  applyTransform();
+}, { passive: false });
+
+mainImg.addEventListener("dblclick", ()=>{
+  if (zoom !== 1) { zoom = 1; tx = 0; ty = 0; }
+  else { zoom = 2; }
+  applyTransform();
+});
+
+let panning=false, startY=0, startTy=0;
+mainImg.addEventListener("pointerdown",(e)=>{
+  if (e.button && e.button!==0) return;
+  panning=true;
+  mainImg.setPointerCapture(e.pointerId);
+  startY=e.clientY; startTy=ty;
+  mainImg.classList.add("grabbing");
+});
+mainImg.addEventListener("pointermove",(e)=>{
+  if (!panning) return;
+  let newTy = startTy + (e.clientY-startY);
+  ty = clamp(newTy, getMinTy(), getMaxTy());
+  applyTransform();
+});
+mainImg.addEventListener("pointerup",(e)=>{
+  if (!panning) return;
+  panning=false;
+  try{mainImg.releasePointerCapture(e.pointerId);}catch(_){}
+  mainImg.classList.remove("grabbing");
+});
+mainImg.addEventListener("pointercancel",()=>{
+  panning=false; mainImg.classList.remove("grabbing");
+});
+
+function applyTransform(){
+  if (zoom === 1) { tx = 0; ty = 0; }
+  mainImg.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${zoom})`;
+}
+
+function clamp(v,a,b){ return Math.min(b, Math.max(a,v)); }
+
+function getMinTy(){
+  if (!mainImg.naturalHeight) return 0;
+  const vh = viewer.clientHeight;
+  const imgH = mainImg.naturalHeight * zoom * (mainImg.clientWidth / mainImg.naturalWidth);
+  if (imgH <= vh) return 0;
+  return -(imgH - vh) / 2;
+}
+function getMaxTy(){
+  return -getMinTy();
+}
+
+loadImages();
+</script>
+</body>
+</html>
