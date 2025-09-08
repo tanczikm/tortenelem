@@ -123,7 +123,9 @@ function updateInfo(){
 }
 
 function next(){ if (currentIndex < images.length - 1) showImage(currentIndex + 1); }
-function prev(){ if (currentIndex > 0) showImage(currentIndex - 1); showImage(currentIndex - 1); }
+function prev(){
+  if (currentIndex > 0) showImage(currentIndex - 1);
+}
 
 prevBtn.addEventListener("click", prev);
 nextBtn.addEventListener("click", next);
